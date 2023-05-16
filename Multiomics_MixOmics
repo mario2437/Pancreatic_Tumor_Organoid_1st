@@ -1,0 +1,169 @@
+.libPaths()
+.libPaths("C:/Program Files/R/R-4.2.0/library")
+R_LIBS_SITE="C:/Program Files/R/R-4.2.0/library"
+options("install.lock"=FALSE)
+
+rm(list=ls())
+install.packages("Rtools", dependencies = TRUE, INSTALL_opts = "--no-lock")
+BiocManager::install("mixOmicsTeam/mixOmics@devel")
+BiocManager::install("mixOmicsTeam/mixOmics") 
+
+
+library(knitr)
+knitr::opts_chunk$set(dpi = 100, echo= TRUE, warning=FALSE, message=FALSE, fig.align = 'center',
+                      fig.show=TRUE, fig.keep = 'all', fig.height= 6, fig.width=7)
+library(mixOmics)
+set.seed(123) # for reproducibility, remove for normal use
+
+setwd("C://Users/BECAUSEWECAN/Desktop/PancreaticCancerOrganoid/Without_PDX/Figure 4/multiomics")
+
+###############################
+
+
+drug<-read.table("drugs_pancO.txt", header=T, sep="\t", na.strings = "NA")
+row.names(drug)<-(drug$SAMPLE)
+drug<-drug[,2:ncol(drug)]
+t.drug<-as.data.frame(t(drug))
+
+mRNA<-read.table("pathway_pancO.txt", header=T, sep="\t", na.strings = "NA")
+row.names(mRNA)<-(mRNA$SAMPLE)
+mRNA<-mRNA[,2:ncol(mRNA)]
+t.mRNA<-as.data.frame(t(mRNA))
+
+mut<-read.table("gene_pancO.txt", header=T, sep="\t", na.strings = "NA")
+row.names(mut)<-(mut$SAMPLE)
+mut<-mut[,2:ncol(mut)]
+t.mut<-as.data.frame(t(mut))
+
+dmRNA<-read.table("mRNA_drug_pancO.txt", header=T, sep="\t", na.strings = "NA")
+row.names(dmRNA)<-(dmRNA$SAMPLE)
+dmRNA<-dmRNA[,2:ncol(dmRNA)]
+t.dmRNA<-as.data.frame(t(dmRNA))
+tt.dmRNA<-t.dmRNA[-c(nearZeroVar(t.dmRNA)$Position)]
+
+X <- list(druginput=t.drug, mRNAinput=t.mRNA, mutinput=t.mut, dmRNAinput=tt.dmRNA)
+X <- list(druginput=t.drug, mRNAinput=t.mRNA, mutinput=t.mut)
+
+lapply(X, dim)
+
+# outcome
+Y <- as.factor(t(read.table("subtype_pancO.txt", header=T, sep="\t", na.strings = "NA")))
+summary(Y)
+
+list.keepX = c(4, 4) # select arbitrary values of features to keep
+list.keepY = c(18, 18)
+pls1 <- spls(X[["druginput"]], X[["mRNAinput"]], ncomp = 1, keepX = 18, keepY = 50) # generate three pairwise PLS models
+pls2 <- spls(X[["mRNAinput"]], X[["mutinput"]], ncomp = 1, keepX = 50, keepY = 4)
+pls3 <- spls(X[["mutinput"]], X[["druginput"]], ncomp = 1, keepX = 4, keepY = 18)
+
+## -------------------------------------------------------------------------------------------------------------------
+
+cor(pls1$variates$X, pls1$variates$Y) # calculate correlation of miRNA and mRNA
+cor(pls2$variates$X, pls2$variates$Y) # calculate correlation of miRNA and proteins
+cor(pls3$variates$X, pls3$variates$Y) # calculate correlation of mRNA and proteins
+
+## -------------------------------------------------------------------------------------------------------------------
+
+design = matrix(0.1, ncol = length(X), nrow = length(X), 
+                dimnames = list(names(X), names(X)))
+diag(design) = 0
+design 
+
+sgccda.res = block.splsda(X = X, Y = Y, ncomp = 5, 
+                          design = design)
+
+perf.diablo = perf(sgccda.res, validation = 'Mfold', 
+                   folds = 5, nrepeat = 10) 
+
+plot(perf.diablo) # plot output of tuning
+
+dev.copy(tiff,"tuning_output_230314.tiff",width=8, height=8, units="in",res=200) 
+dev.off() 
+
+ncomp = perf.diablo$choice.ncomp$WeightedVote["Overall.BER", "centroids.dist"]
+perf.diablo$choice.ncomp$WeightedVote # show the optimal choice for ncomp for each dist metric
+
+
+test.keepX = list(mRNAinput = c(5:9, seq(10, 18, 2), seq(20,30,5)),
+                  druginput = c(5:9, seq(10, 18, 2), seq(20,30,5)),
+                  mutinput = c(5:9, seq(10, 18, 2), seq(20,30,5)),
+                  dmRNAinput = c(5:9, seq(10, 18, 2), seq(20,30,5)))
+
+test.keepX = list(mRNAinput = c(5:9, seq(10, 18, 2), seq(20,30,5)),
+                  druginput = c(5:9, seq(10, 18, 2), seq(20,30,5)),
+                  mutinput = c(5:9, seq(10, 18, 2), seq(20,30,5)))
+
+t1 = proc.time()
+tune.pancO = tune.block.splsda(X = X, Y = Y, ncomp = ncomp,
+                             test.keepX = test.keepX, design = design,
+                             validation = 'Mfold', folds = 5, nrepeat = 1,
+                             dist = "centroids.dist")
+
+## -------------------------------------------------------------------------------------------------------------------
+
+list.keepX = tune.pancO$choice.keepX # set the optimal values of features to retain
+list.keepX
+
+final.diablo.model = block.splsda(X = X, Y = Y, ncomp = ncomp, # set the optimised DIABLO model
+                                  keepX = list.keepX, design = design)
+
+final.diablo.model$design # design matrix for the final model
+
+set.seed(123) # for reproducibility, only when the `cpus' argument is not used
+
+selectVar(final.diablo.model, block = 'druginput', comp = 1)$mRNA$name
+selectVar(final.diablo.model, block = 'druginput', comp = 1)$mRNA$name
+selectVar(final.diablo.model, block = 'druginput', comp = 1)$mRNA$name
+
+selectVar(final.diablo.model)
+
+plotDiablo(final.diablo.model, ncomp = 1, color.Y = c('orchid4','gold2'))
+
+dev.copy(tiff,"correlation_between_components_230314.tiff",width=8, height=8, units="in",res=200) 
+dev.off() 
+
+
+
+plotIndiv(final.diablo.model, ind.names = FALSE, legend = TRUE, 
+          title = 'DIABLO Sample Plots', color.Y = c('orchid4','gold2'))
+
+dev.copy(tiff,"eachblock_eachlevel_230314.tiff",width=8, height=8, units="in",res=200) 
+dev.off() 
+
+plotArrow(final.diablo.model, ind.names = FALSE, legend = TRUE, 
+          title = 'DIABLO')
+
+dev.copy(tiff,"arrowplot_230314.tiff",width=8, height=8, units="in",res=200) 
+dev.off() 
+
+plotVar(final.diablo.model, var.names = FALSE, 
+        style = 'graphics', legend = TRUE,
+        pch = c(18, 17, 16, 15), cex = c(1,1,1,1), 
+        col = c('red4', 'skyblue4', 'lightgreen', 'blue4'))
+
+dev.copy(tiff,"correlation_circle_230314.tiff",width=10, height=10, units="in",res=200) 
+dev.off() 
+
+circosPlot(final.diablo.model, cutoff = 0.78, line = TRUE, size.legend = 0.7, ncol.legend = 1, size.variables = 0.4,
+           color.blocks= c('red4', 'skyblue4', 'lightgreen', 'blue4'), color.Y = c('orchid4','gold2'),
+           color.cor = c("blue1","red1"), size.labels = 1, legend = TRUE)
+
+dev.copy(tiff,"circos_077cutoff__name_230314.tiff",width=8, height=8, units="in",res=200) 
+dev.off() 
+
+network(final.diablo.model, blocks = c(1,2,3,4),
+        color.node = c('red4', 'skyblue4', 'lightgreen', 'blue4'), cutoff = 0.75)
+
+dev.copy(tiff,"network_075cutoff__name_230314.tiff",width=8, height=8, units="in",res=200) 
+dev.off() 
+
+plotLoadings(final.diablo.model, comp = 5, contrib = 'max', method = 'median')
+dev.copy(tiff,"comp5.tiff",width=10, height=8, units="in",res=200) 
+dev.off() 
+
+setwd("C://Users/BECAUSEWECAN/Desktop/PancreaticCancerOrganoid/Without_PDX/Figure 3")
+
+a1<-read.table("PancOrgRNA_readcount.txt", header=T, sep="\t", na.strings = "NA")
+b1<-as.vector(t(read.table("drug_genes_exp_230309.txt", header=T, sep="\t", na.strings = "NA")))
+a1<- a1 %>% filter (Gene_Symbol %in% b1)
+write.table(a1, "mRNA_drug_230309.txt", sep = "\t", row.names = F)
