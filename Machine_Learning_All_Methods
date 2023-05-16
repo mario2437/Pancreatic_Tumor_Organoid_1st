@@ -1,0 +1,505 @@
+rm(list=ls())
+graphics.off()
+
+setwd("C://yourpath")
+
+data1<-read.table("drug_correlation_230228.txt", header=T, sep="\t", na.strings = "NA", fill=T, 
+                  quote = "") %>%
+  mutate(meta_site = factor(meta_site)) %>%
+  mutate(meta_nometa = factor(meta_nometa)) %>% drop_na()
+
+row.names(data1)<-as.vector(data1$SAMPLE)
+pancO<-data1[,2:79]
+pancO<-as.data.frame(pancO)
+
+pancO %>%
+  group_by(meta_nometa) %>%
+  dplyr::count() %>%
+  dplyr::mutate(pct = n / nrow(pancO))
+
+###################################################
+
+library(modelr)
+
+num_points <- 100
+
+fake_grid <- data_grid(
+  panc0, 
+  MitomycinC = seq_range(MitomycinC, num_points),
+  Irinotecan = seq_range(Irinotecan, num_points)
+)
+
+form <- as.formula("meta_nometa ~ MitomycinC + Irinotecan")
+
+dmod_null <- logistic_reg(mode = "classification") %>%
+  set_engine("glm")
+
+dmod_tree <- decision_tree(mode = "classification") %>%
+  set_engine("rpart", control = rpart.control(cp = 0.005, minbucket = 2))
+
+dmod_forest <- rand_forest(
+  mode = "classification", 
+  trees = 401, 
+  mtry = 10
+) %>%
+  set_engine("randomForest")
+
+dmod_knn <- nearest_neighbor(mode = "classification", neighbors = 2) %>%
+  set_engine("kknn", scale = TRUE)
+
+dmod_nnet <- mlp(mode = "classification", hidden_units = 2) %>%
+  set_engine("nnet")
+
+dmod_nb <- naive_Bayes() %>%
+  set_engine("klaR")
+
+library(randomForest)
+library(purrr)
+library(kknn)
+library(discrim)
+library(klaR)
+
+bmi_mods <- tibble(
+  type = c(
+    "Logistic Regression", "Decision Tree", "Random Forest", 
+    "k-Nearest-Neighbor", "Neural Network", "Naive Bayes"
+  ),
+  spec = list(
+    dmod_null, dmod_tree, dmod_forest, dmod_knn, dmod_nnet, dmod_nb
+  ),
+  mod = map(spec, fit, form, data = pancO),
+  y_hat = map(mod, predict, new_data = fake_grid, type = "prob")
+)
+
+bmi_mods <- bmi_mods %>%
+  mutate(
+    X = list(fake_grid),
+    yX = map2(y_hat, X, bind_cols)
+  )
+
+res <- bmi_mods %>%
+  select(type, yX) %>%
+  unnest(cols = yX)
+res
+
+ggplot(data = res, aes(x = MitomycinC, y = Irinotecan)) +
+  geom_tile(aes(fill = .pred_metastasis), color = NA) + 
+  geom_count(
+    data = pancO, 
+    aes(color = meta_nometa), alpha = 0.4
+  ) + 
+  scale_fill_gradient("Prob of\nmetastasis", low = "white", high = "red") + 
+  scale_color_manual(values = c("gold", "black")) +
+  scale_size(range = c(0, 2)) + 
+  scale_x_continuous(expand = c(0.02,0)) + 
+  scale_y_continuous(expand = c(0.02,0)) + 
+  facet_wrap(~type, ncol = 2)
+
+dev.copy(tiff,"comparisonmodel_pancO_mitomycinC_Irinotecan_230410.tiff",width=8, height=10, units="in",res=200) 
+dev.off() 
+
+
+#######################################################
+#######################################################
+#######################################################
+library(globals)
+library(tidymodels)
+
+set.seed(364)
+n <- nrow(pancO)
+census_parts <- pancO %>%
+  initial_split(prop = 0.8)
+train <- census_parts %>% training()
+test <- census_parts %>% testing()
+pi_bar <- train %>%
+  dplyr::count(meta_nometa) %>%
+  dplyr::mutate(pct = n / sum(n)) %>%
+  dplyr::filter(meta_nometa == "metastasis") %>%
+  pull(pct)
+
+form <- as.formula(
+  "meta_nometa ~ Olaparib + Fluorouracil + Paclitaxel + Everolimus + Sunitinib + Vorinostat + MK5108 + Buparlisib + 
+  ICG001 + Erlotinib + Afatinib + Gemcitabine + Cyclopamine + Irinotecan + Apitolisib + Trametinib + Belinostat + 
+  MitomycinC + TNFA_SIGNALING_VIA_NFKB + HYPOXIA + CHOLESTEROL_HOMEOSTASIS + MITOTIC_SPINDLE + WNT_BETA_CATENIN_SIGNALING + 
+  TGF_BETA_SIGNALING + IL6_JAK_STAT3_SIGNALING + DNA_REPAIR + G2M_CHECKPOINT + APOPTOSIS + NOTCH_SIGNALING + ADIPOGENESIS + 
+  ESTROGEN_RESPONSE_EARLY + ESTROGEN_RESPONSE_LATE + ANDROGEN_RESPONSE + MYOGENESIS + PROTEIN_SECRETION + 
+  INTERFERON_ALPHA_RESPONSE + INTERFERON_GAMMA_RESPONSE + APICAL_JUNCTION + APICAL_SURFACE + HEDGEHOG_SIGNALING + 
+  COMPLEMENT + UNFOLDED_PROTEIN_RESPONSE + PI3K_AKT_MTOR_SIGNALING + MTORC1_SIGNALING + E2F_TARGETS + MYC_TARGETS_V1 + 
+  MYC_TARGETS_V2 + EPITHELIAL_MESENCHYMAL_TRANSITION + INFLAMMATORY_RESPONSE + XENOBIOTIC_METABOLISM + 
+  FATTY_ACID_METABOLISM + OXIDATIVE_PHOSPHORYLATION + GLYCOLYSIS + REACTIVE_OXYGEN_SPECIES_PATHWAY + P53_PATHWAY + 
+  UV_RESPONSE_UP + UV_RESPONSE_DN + ANGIOGENESIS + HEME_METABOLISM + COAGULATION + IL2_STAT5_SIGNALING + 
+  BILE_ACID_METABOLISM + PEROXISOME + ALLOGRAFT_REJECTION + SPERMATOGENESIS + KRAS_SIGNALING_UP + KRAS_SIGNALING_DN + 
+  PANCREAS_BETA_CELLS + KRAS_c35G_A + Regimen + meta_site + location + KRAS_subtype + pre_chemo + RNA_cluster + 
+  drug_cluster + TP53"
+)
+
+#####################decision tree########################
+
+mod_dtree <- decision_tree(mode = "classification") %>%
+  set_engine("rpart", 
+    control = rpart.control(cp = 0.005, minbucket = 3)
+  ) %>%
+  fit(form, data = pancO)
+
+
+mod_dtree <- decision_tree(mode = "classification") %>%
+  set_engine("rpart") %>%
+  fit(form, data = train)
+
+mod_dtree
+
+plot(as.party(mod_dtree$fit))
+
+dev.copy(tiff,"pancO_g2m_mito_irino_230315.tiff",width=8, height=10, units="in",res=200) 
+dev.off() 
+
+install.packages("remotes")
+library(remotes)
+library(parttree)
+remotes::install_github("grantmcdermott/parttree")
+
+pancO %>%
+  ggplot(aes(x=G2M_CHECKPOINT, y=MitomycinC)) +
+  geom_jitter(aes(col=meta_nometa), alpha=0.7) +
+  geom_parttree(data = mod_dtree, aes(fill=meta_nometa), alpha = 0.1) +
+  theme_minimal()
+
+
+#################FINDAUC#################
+# Decision trees tuning parameters
+
+library(yardstick)
+
+pred <- train %>%
+  dplyr::select(meta_nometa) %>%
+  bind_cols(
+    predict(mod_dtree, new_data = train, type = "class")
+  ) %>%
+  dplyr::rename(meta_nometa_dtree = .pred_class)
+
+confusion <- pred %>%
+  yardstick::conf_mat(truth = meta_nometa, estimate = meta_nometa_dtree)
+
+confusion
+
+meta_nometa_probs <- pred %>%
+  dplyr::select(meta_nometa, meta_nometa_dtree) %>%
+  bind_cols(
+    predict(mod_dtree, new_data = train, type = "prob")
+  )
+
+roc <- pred %>%
+  mutate(estimate = pull(meta_nometa_probs, `.pred_no`)) %>%
+  roc_curve(truth = meta_nometa, estimate, event_level = "second") %>%
+  autoplot()
+
+metrics <- pred %>%
+  yardstick::conf_mat(meta_nometa, meta_nometa_dtree) %>%
+  summary(event_level = "second")
+
+roc_mod <- metrics %>%
+  filter(.metric %in% c("sens", "spec")) %>%
+  pivot_wider(-.estimator, names_from = .metric, values_from = .estimate)
+
+roc + 
+  geom_point(
+    data = roc_mod, size = 3, 
+    aes(x = 1 - spec, y = sens)
+  )
+
+#Find accuracy
+accuracy(pred, meta_nometa, meta_nometa_dtree)
+
+autoplot(confusion) +
+  geom_label(
+    aes(
+      x = (xmax + xmin) / 2, 
+      y = (ymax + ymin) / 2, 
+      label = c("TN", "FP", "FN", "TP")
+    )
+  )
+dev.copy(tiff,"decision_tree_metanometa_drug_230418.tiff",width=5, height=5, units="in",res=200) 
+dev.off() 
+
+# Random forest
+
+mod_forest <- rand_forest(
+  mode = "classification", 
+  mtry = 5, 
+  trees = 201
+) %>%
+  set_engine("randomForest") %>%
+  fit(form, data = train)
+
+pred <- pred %>%
+  bind_cols(
+    predict(mod_forest, new_data = train, type = "class")
+  ) %>%
+  rename(meta_nometa_rf2 = .pred_class)
+
+pred %>%
+  yardstick::conf_mat(meta_nometa, meta_nometa_rf)
+
+pred %>%
+  yardstick::accuracy(meta_nometa, meta_nometa_rf)
+
+importancefromforest<-randomForest::importance(mod_forest$fit) %>% 
+  as_tibble(rownames = "variable") %>%
+  arrange(desc(MeanDecreaseGini))
+
+# Nearest neighbor
+
+mod_knn <- nearest_neighbor(neighbors = 19, mode = "classification") %>%
+  set_engine("kknn", scale = TRUE) %>%
+  fit(meta_nometa ~ ., data = train)
+
+pred <- pred %>%
+  bind_cols(
+    predict(mod_knn, new_data = train, type = "class")
+  ) %>%
+  rename(meta_nometa_knn = .pred_class)
+
+pred %>%
+  yardstick::conf_mat(meta_nometa, meta_nometa_knn)
+
+pred %>%
+  accuracy(meta_nometa, meta_nometa_knn)
+
+# Naive Bayes
+
+train %>%
+  as.data.frame() %>%
+  head(1)
+
+library(discrim)
+
+mod_nb <- naive_Bayes(mode = "classification") %>%
+  set_engine("klaR") %>%
+  fit(form, data = train)
+
+pred <- pred %>%  
+  bind_cols(
+    predict(mod_nb, new_data = train, type = "class")
+  ) %>%
+  rename(meta_nometa_nb = .pred_class)
+
+pred %>%
+  yardstick::conf_mat(meta_nometa, meta_nometa_nb)
+
+accuracy(pred, meta_nometa, meta_nometa_nb)
+
+
+
+# Artificial neural networks
+
+mod_nn <- mlp(mode = "classification", hidden_units = 2) %>%
+  set_engine("nnet") %>%
+  fit(form, data = train)
+
+library(nnet)
+library(clusterGeneration)
+library(devtools)
+source_url('https://gist.githubusercontent.com/Peque/41a9e20d6687f2f3108d/raw/85e14f3a292e126f1454864427e3a189c2fe33f3/nnet_plot_update.r')
+
+pred <- pred %>%
+  bind_cols(
+    predict(mod_nn, new_data = train, type = "class")
+  ) %>%
+  rename(meta_nometa_nn = .pred_class)
+
+accuracy(pred, meta_nometa, meta_nometa_nn)
+
+pred %>%
+  yardstick::conf_mat(meta_nometa, meta_nometa_nn)
+
+
+
+wts.in<-mod1$wts
+struct<-mod1$n
+plot.nnet(wts.in,struct=struct)
+
+
+## logistic regression
+mod_log_1 <- logistic_reg(mode = "classification") %>%
+  set_engine("glm") %>%
+  fit(form, data = train)
+
+pred <- pred %>%
+  bind_cols(
+    predict(mod_log_1, new_data = train, type = "class")
+  ) %>%
+  rename(meta_nometa_log_1 = .pred_class)
+
+confusion_log_1 <- pred %>%
+  yardstick::conf_mat(truth = meta_nometa, estimate = meta_nometa_log_1)
+
+confusion_log_1
+
+accuracy(pred, meta_nometa, meta_nometa_log_1)
+
+meta_nometa_probs <- pred %>%
+  dplyr::select(meta_nometa, meta_nometa_log_1) %>%
+  bind_cols(
+    predict(mod_log_1, new_data = train, type = "prob")
+  )
+
+roc <- pred %>%
+  mutate(estimate = pull(meta_nometa_probs, `.pred_no`)) %>%
+  roc_curve(truth = meta_nometa, estimate, event_level = "second") %>%
+  autoplot()
+
+metrics <- pred %>%
+  yardstick::conf_mat(meta_nometa, meta_nometa_log_1) %>%
+  summary(event_level = "second")
+
+roc_mod <- metrics %>%
+  filter(.metric %in% c("sens", "spec")) %>%
+  pivot_wider(-.estimator, names_from = .metric, values_from = .estimate)
+
+roc + 
+  geom_point(
+    data = roc_mod, size = 3, 
+    aes(x = 1 - spec, y = sens)
+  )
+
+metrics
+
+head(meta_nometa_probs)
+
+broom::tidy(mod_log_1)
+#Ensemble methods
+
+pred <- pred %>%
+  rowwise() %>%
+  mutate(
+    resistant = sum(c_across(contains("Doxorubicin_drug")) == "Resistant"),
+    Doxorubicin_drug_ensemble = factor(ifelse(resistant >= 3, "Resistant", "Sensitive"))
+  ) %>%
+  ungroup()
+
+pred %>%
+  select(-resistant) %>%
+  pivot_longer(
+    cols = -Doxorubicin_drug, 
+    names_to = "model", 
+    values_to = "prediction"
+  ) %>%
+  group_by(model) %>%
+  summarize(accuracy = accuracy_vec(Doxorubicin_drug, prediction)) %>%
+  arrange(desc(accuracy))
+
+#################################
+# Evaluation of meta models redux
+#################################
+
+mod_null <- logistic_reg(mode = "classification") %>%
+  set_engine("glm") %>%
+  fit(meta_nometa ~ 1, data = train)
+
+mod_log_all <- logistic_reg(mode = "classification") %>%
+  set_engine("glm") %>%
+  fit(form, data = train)
+
+mods <- tibble(
+  type = c(
+    "null", "log_all", "tree", 
+    "knn", "neural_net", "naive_bayes"
+  ),
+  mod = list(
+    mod_null, mod_log_all, mod_dtree,
+    mod_knn, mod_nn, mod_nb
+  )
+)
+
+map(mods$mod, class)
+
+mods <- mods %>%
+  mutate(
+    y_train = list(pull(train, meta_nometa)),
+    y_test = list(pull(test, meta_nometa)),
+    y_hat_train = map(
+      mods$mod, 
+      ~pull(predict(.x, new_data = train, type = "class"), .pred_class)
+    ),
+    y_hat_test = map(
+      mods$mod, 
+      ~pull(predict(.x, new_data = test, type = "class"), .pred_class)
+    )
+  )
+
+mods
+
+predict_ensemble <- function(x) {
+  majority <- ceiling(length(x) / 2)
+  x %>%
+    data.frame() %>%
+    rowwise() %>%
+    mutate(
+      rich_votes = sum(c_across() == "meta"),
+      .pred_class = factor(ifelse(rich_votes >= majority , "meta", "nometa"))
+    ) %>%
+    pull(.pred_class) %>%
+    fct_relevel("nometa")
+}
+
+ensemble <- tibble(
+  type = "ensemble",
+  mod = NA,
+  y_train = list(predict_ensemble(pull(mods, y_train))),
+  y_test = list(predict_ensemble(pull(mods, y_test))),
+  y_hat_train = list(predict_ensemble(pull(mods, y_hat_train))),
+  y_hat_test = list(predict_ensemble(pull(mods, y_hat_test))),
+)
+
+mods <- mods %>%
+  bind_rows(ensemble)
+
+library(yardstick) # accuracy_vec from yardstick package
+
+mods <- mods %>%
+  mutate(
+    accuracy_train = map2_dbl(y_train, y_hat_train, accuracy_vec),
+    accuracy_test = map2_dbl(y_test, y_hat_test, accuracy_vec),
+    sens_test = map2_dbl(
+      y_test,
+      y_hat_test,
+      sens_vec,
+      event_level = "second"
+    ),
+    spec_test = map2_dbl(y_test,
+                         y_hat_test,
+                         spec_vec,
+                         event_level = "second"
+    )
+  )
+
+mods %>%
+  select(-mod, -matches("^y")) %>%
+  arrange(desc(accuracy_test))
+
+mods <- mods %>%
+  filter(type != "ensemble") %>%
+  mutate(
+    y_hat_prob_test = map(
+      mod, 
+      ~pull(predict(.x, new_data = test, type = "prob"), `.pred_meta`)
+    ),
+    type = fct_reorder(type, sens_test, .desc = TRUE)
+  )
+
+mods %>%
+  select(type, y_test, y_hat_prob_test) %>%
+  unnest(cols = c(y_test, y_hat_prob_test)) %>%
+  group_by(type) %>%
+  roc_curve(truth = y_test, y_hat_prob_test, event_level = "second") %>%
+  autoplot() + 
+  geom_point(
+    data = mods, 
+    aes(x = 1 - spec_test, y = sens_test, color = type), 
+    size = 4
+  )
+
+
+
+
+
