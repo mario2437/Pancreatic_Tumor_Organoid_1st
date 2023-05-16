@@ -1,0 +1,156 @@
+library(dplyr)
+setwd("C://Users/BECAUSEWECAN/Desktop/PancreaticCancerOrganoid/Without_PDX/Figure 4/Wilcox_gene_woPDX")
+########AUC,Mutation file
+rm(list=ls())
+
+directory <- c("C://Users/BECAUSEWECAN/Desktop/PancreaticCancerOrganoid/Without_PDX/Figure 4/Wilcox_gene_woPDX")
+AUC_file <- read.table("PancO_AUC_230227.txt",sep = "", header=T) 
+AUC_file[is.na(AUC_file)] = ""
+AUC_file = as.data.frame(AUC_file)
+row.names(AUC_file) <- AUC_file$SAMPLE
+AUC_file<-AUC_file[,2:ncol(AUC_file)]
+
+MUT_file <- read.table("PancO_MUT_230227.txt",sep = "",header=T) 
+MUT_file[is.na(MUT_file)] = ""
+MUT_file = as.data.frame(MUT_file)
+row.names(MUT_file) <- MUT_file$SAMPLE
+MUT_file<-MUT_file[,2:ncol(MUT_file)]
+
+########wilcox, fold change 
+
+Drug_list<-as.vector(t(read.table("PancO_druglist_230227.txt", sep = "\t", header=T, na.strings=NA)))
+
+MUT_list <- as.vector(t(read.table("PancO_Mutlist_230227.txt", sep = "\t", header=T, na.strings=NA)))
+AUC_MUT <- list(NULL)
+a = 1
+
+for (i in 1:length(Drug_list)) {
+  now <- AUC_file%>%select(Drug_list[i])
+  
+  for (j in 1:length(MUT_list)) {
+    MUT_now <- MUT_file%>%select(MUT_list[j])
+    AUC_MUT_comb <- cbind(now, MUT_now)
+    
+    AUC_MUT[a] <- list(data.frame(AUC_MUT_comb))
+    a = a+1
+  }
+}
+
+########P-value 
+
+Drug_Mutation_Pvalue <- NULL
+
+
+for (i in 1:length(AUC_MUT)) {
+  
+  wilvalue <- wilcox.test(AUC_MUT[[i]][,1]~AUC_MUT[[i]][,2])
+  p_value <- wilvalue[[3]]
+  smalldf <- data.frame(p_value)
+  df <- colnames(AUC_MUT[[i]])
+  Drug <- df[1]
+  Mut <- df[2]
+  df_1 <- data.frame(Drug, Mut, smalldf)
+  
+  Drug_Mutation_Pvalue <- rbind(Drug_Mutation_Pvalue, df_1)
+  
+}
+
+
+########fold change 
+
+WT_df <- NULL
+MUT_df <- NULL
+WT_med <- NULL
+MUT_med <- NULL
+Drug_Mutation_AUC_foldchange <- NULL
+
+for (i in 1:length(AUC_MUT)) {
+  now <- AUC_MUT[[i]]
+  WT_df <- NULL
+  MUT_df <- NULL  
+  for (j in 1:nrow(now)) {
+    now_2 <- now[j,]
+    
+    if (now[j,2] == "WT") {
+      WT_df <- rbind(WT_df,now_2)
+    } else {
+      MUT_df <- rbind(MUT_df, now_2)
+    }
+    
+  }
+  
+  WT_med <- median(WT_df[,1])
+  MUT_med <- median(MUT_df[,1])
+  
+  AUC <- MUT_med/WT_med
+  AUC <- data.frame(AUC)
+  MUT_cnt <- nrow(MUT_df)
+  df <- colnames(AUC_MUT[[i]])
+  Drug <- df[1]
+  Mut <- df[2]
+  df_1 <- data.frame(Drug, Mut, AUC, MUT_cnt)
+  
+  Drug_Mutation_AUC_foldchange <- rbind(Drug_Mutation_AUC_foldchange, df_1)
+  
+}
+
+
+########p value df
+
+test <- cbind(Drug_Mutation_Pvalue, Drug_Mutation_AUC_foldchange)
+write.table(test,"PancOAUC_foldchange_Pvalue_MUTcnt.txt", row.names = F, col.names = T, append = F, quote = F, sep = "\t")
+
+
+###############Plot
+
+library(ggplot2)
+library(readxl)
+library(ggrepel)
+
+rm(list=ls())
+de <- read.table("PancOAUC_foldchange_Pvalue_MUTcnt.txt",sep = "", header=T)
+
+
+de$diffexpressed <- "Not Significant"
+de$diffexpressed[log2(de$AUC) > 0.2 & de$p_value < 0.1] <- "Resistant"
+de$diffexpressed[log2(de$AUC) < -0.2 & de$p_value < 0.1] <- "Sensitive"
+
+de$delabel <- NA
+de$delabel[de$diffexpressed != "Not Significant"] <- 
+  paste(de$Mut[de$diffexpressed != "Not Significant"],
+        de$Drug[de$diffexpressed != "Not Significant"], sep = "\n")
+
+
+mycolors <- c(adjustcolor("#E9967A", alpha=50), adjustcolor("#6495ED", alpha=50), adjustcolor("#BEBEBE", alpha=50))
+names(mycolors) <- c("Resistant", "Sensitive", "Not Significant")
+
+ggplot(data=de, aes(x=log2(AUC), y=-log10(p_value), size=-log(p_value), label=delabel)) + 
+  geom_point(aes(fill = diffexpressed, size = MUT_cnt), shape=21)+  
+  theme_minimal() + coord_cartesian(xlim=c(-1,1), ylim=c(0,2)) + 
+  geom_vline(xintercept=c(-0.2, 0.2),lty = 5, col="black") + 
+  geom_hline(yintercept=-log10(0.1), lty = 5, col="black")+  
+  geom_text_repel(max.overlaps = 100, min.segment.length = 0, size = 5, box.padding = 1) +
+  theme(legend.title=element_blank()) + theme(text = element_text(size = 20)) +
+  scale_fill_manual(values = mycolors, aesthetics = "fill") + 
+  xlab("log2(fold-change AUC)") + ylab("-log10(P value)") + 
+  guides(size = F,fill = guide_legend(override.aes = list(size = 4)))
+
+##########################################################################################
+
+
+ggplot(data=de, aes(x=log2(AUC), y=-log10(p_value), size=-log(MUT_cnt), label=delabel)) + 
+  geom_point(aes(fill = diffexpressed, size = MUT_cnt), shape=21)+  
+  theme_minimal() + coord_cartesian(xlim=c(-1,1), ylim=c(0,2)) + 
+  geom_vline(xintercept=c(-0.2, 0.2),lty = 5, col="black") + 
+  geom_hline(yintercept=-log10(0.1), lty = 5, col="black")+  
+  geom_text_repel(max.overlaps = 100, min.segment.length = 0, size = 5, box.padding = 1) +
+  theme(legend.title=element_blank()) + theme(text = element_text(size = 20)) +
+  scale_fill_manual(values = mycolors, aesthetics = "fill") + 
+  xlab("log2(fold-change AUC)") + ylab("-log10(P value)") + 
+  guides(size = F,fill = guide_legend(override.aes = list(size = 4)))
+
+
+
+
+dev.copy(tiff,"Panc_MUT_DRUG_size_230413_label.tiff",width=8, height=11, units="in",res=200) 
+dev.off() 
