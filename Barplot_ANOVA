@@ -1,0 +1,127 @@
+rm(list=ls())
+graphics.off()
+
+setwd("C://Users/BECAUSEWECAN/Desktop/PancreaticCancerOrganoid/Without_PDX/Figure 2")
+library("dplyr")
+library("ggpubr")
+
+data1<-read.table("ANOVA_boxplot_230121.txt", header=T, sep="\t", na.strings = "NA", fill = T)
+data2<-as.data.frame(data1[,2:ncol(data1)])
+data3<- data1[,c("Name", "Meta", "mathscore_sig")]
+data3<- data1 %>% select(c("Name", "Meta", "mathscore_sig"))
+## DS.8201a doesn't have value and was excluded from the analysis 
+###Draw distribution
+ggdensity(data2$mathscore_sig, 
+          main = "TEST",
+          xlab = "Name")
+###Draw quantile-quantile plot
+ggqqplot(data1$KRAS_c.35G>A)
+shapiro.test(data2$mathscore_sig)
+###Calculate p-value, Shapiro-Wilk 
+normalitytest_pancreas_VAF<-cbind(shapiro.test(data2$KRAS_c.35G_A),shapiro.test(data2$KRAS_c.35G_T),shapiro.test(data2$TP53_c.215C_G),
+                                    shapiro.test(data2$CFTR_c.1408G_A),shapiro.test(data2$FGFR4_c.1162G_A),shapiro.test(data2$NOTCH2_c.112G_A),
+                                    shapiro.test(data2$NOTCH2_c.137A_G))
+normalitytest_pancreas_VAF
+write.table(normalitytest_pancreas_VAF, "normalitytest_pancreas_VAF_230109.txt", sep="\t")
+
+##### TOTAL
+res.man <- manova(cbind(data2$KRAS_c.35G_A,data2$KRAS_c.35G_T,data2$TP53_c.215C_G,data2$CFTR_c.1408G_A,
+                        data2$FGFR4_c.1162G_A,data2$NOTCH2_c.112G_A,data2$NOTCH2_c.137A_G) ~ Meta, data = data2)
+
+summary(res.man)
+summary.aov(res.man)
+
+ggboxplot(data1, x = "preoptx", y = "KRAS_c.35G.A", 
+          color = "preoptx", palette = "rainbow",
+          main = "KRAS_c.35G.A",
+          add = c("jitter"), 
+          order = c("no", "FOLFIRINOX", "5-FU", "CCRT", "CCRTw5FU", "CCRTwgemcitabine"),
+          ylab = "VAF", xlab = "Pre-Operation Treatment")
+
+dev.copy(tiff,"boxplot_jitter_notch2c112ga_230109.tiff",width=10, height=6, units="in",res=200) 
+dev.off() 
+
+
+ggboxplot(data1, x = "Meta", y = "KRAS_c.35G.T", 
+          color = "Meta", palette = "rainbow",
+          main = "KRAS_c.35G.A",
+          add = c("jitter"), 
+          order = c("no","metastasis_lymph node","metastasis_liver_lymph node","metastasis_liver","metastasis_lung","metastasis_multi","recur"),
+          ylab = "VAF", xlab = "Pre-Operation Treatment") +
+  rotate_x_text(angle = 45)+
+  stat_compare_means(method = "t.test", label.y = 1.2)+        # Add global annova p-value
+  stat_compare_means(label = "p.signif", method = "t.test",
+                     ref.group = ".all.")                      # Pairwise comparison against all
+
+
+dev.copy(tiff,"boxplot_KRAS_c.35G_A_metaorgan_230207.tiff",width=10, height=6, units="in",res=200) 
+dev.off() 
+stat_compare_means(method = "anova", label.y = 1.2)     # Add global p-value
+
+#############################################################################################
+
+my_comparisons <- list( c("no", "metastasis_lymph node"), c("no", "metastasis_liver_lymph node"), 
+                        c("no", "metastasis_liver"))
+ggboxplot(data1, x = "meta_site", y = "KRAS_c.35G.A",
+          color = "meta_site", palette = "rainbow",
+          main = "KRAS_c.35G.A",
+          add = c("jitter"), 
+          order = c("no","metastasis_lymph node","metastasis_liver_lymph node","metastasis_liver","metastasis_lung","metastasis_multi","recur"),
+          ylab = "VAF", xlab = "Pre-Operation Treatment")+ 
+  stat_compare_means(comparisons = my_comparisons)+ # Add pairwise comparisons p-value
+  stat_compare_means(method = "anova", label.y = 1.5)     # Add global p-value
+
+dev.copy(tiff,"boxplot_KRAS_c.35G_A_metaorgan_each_comp_230207.tiff",width=10, height=6, units="in",res=200) 
+dev.off() 
+
+
+#############################################################################################
+#############################################################################################
+#############################################################################################
+p <- ggboxplot(data1, x = "Meta", y = "KRAS_c.35G.T",
+               color = "Meta", palette = "jco",
+               add = "jitter")
+#  Add p-value
+p + stat_compare_means(method = "wilcox.test")
+# Change method
+p + stat_compare_means(method = "t.test")
+
+
+
+
+
+
+ggboxplot(data1, x = "KRAS.type", y = "mathscore_sig", color = "KRAS.type", 
+          add = "jitter", legend = "none") +
+  rotate_x_text(angle = 45)+
+  geom_hline(yintercept = mean(data1$LMR), linetype = 2)+ # Add horizontal line at base mean
+  stat_compare_means(method = "anova", label.y = 30)+        # Add global annova p-value
+  stat_compare_means(label = "p.signif", method = "t.test",
+                     ref.group = ".all.")                      # Pairwise comparison against all
+
+dev.copy(tiff,"boxplot_PLR_RNA_anova_230118.tiff",width=5, height=5, units="in",res=200) 
+dev.off() 
+
+
+my_comparisons <- list( c("c.35G_A", "c.35G_T"), c("FOLFIRINOX", "Whipple_s op"), 
+                        c("FOLFIRINOX", "PPPD"))
+ggboxplot(data1, x = "KRAS.type", y = "mathscore_sig",
+          color = "KRAS.type", palette = "jco")+ 
+  stat_compare_means(comparisons = my_comparisons)+ # Add pairwise comparisons p-value
+  stat_compare_means(label.y = 27)     # Add global p-value
+
+dev.copy(tiff,"boxplot_PLR_RNA_kruskal-wallis_sig299_230119.tiff",width=5, height=5, units="in",res=200) 
+dev.off() 
+
+graphics.off()
+
+
+
+cor(data1$Size, data1$mathscore_sig, method = c("pearson"))
+
+ggscatter(data1, x = "Size", y = "mathscore", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Size", ylab = "mathscore_sig")
+
+
