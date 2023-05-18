@@ -1,0 +1,229 @@
+rm(list=ls())
+graphics.off()
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  BiocManager::install("MutationalPatterns")
+BiocManager::install("NMF")
+library("cli")
+library("NMF")
+library("MutationalPatterns")
+library("dplyr")
+
+
+library('BSgenome')
+head(available.genomes())
+ref_genome <- "BSgenome.Hsapiens.UCSC.hg19"
+
+library(ref_genome, character.only = TRUE)
+library(BSgenome.Hsapiens.UCSC.hg19, quietly = TRUE)
+
+library(BSgenome.Hsapiens.UCSC.hg38, quietly = TRUE)
+
+setwd("C://Users/BECAUSEWECAN/Desktop/PancreaticCancerOrganoid/Without_PDX/Figure 2/mutationalpattern/total")
+
+
+####################################################################################
+
+ref_genome <- "BSgenome.Hsapiens.UCSC.hg19"
+
+a<-getwd()
+b<-dir(a,recursive=T)
+
+vcf_dir <- c('C://Users/BECAUSEWECAN/Desktop/PancreaticCancerOrganoid/Without_PDX/Figure 2/mutationalpattern/total')
+vcf_files <- list.files(vcf_dir, pattern = ".vcf", full.names = TRUE)
+
+data1<-read.table("samplename_total.txt", header = T, sep = "\t")
+
+v.data1<-as.vector(t(data1$Name))
+length(v.data1)
+sample_names <- v.data1
+
+v.data2<-as.vector(t(data1$Meta))
+length(v.data2)
+tissue <- v.data2
+
+v.data3<-as.vector(t(data1$meta_site))
+length(v.data3)
+specific_tissue <- v.data3
+
+
+vcfss <- read_vcfs_as_granges(vcf_files, sample_names, ref_genome, type = "all")
+
+snv_grl <- get_mut_type(vcfss, type = "snv")
+indel_grl <- get_mut_type(vcfss, type = "indel")
+dbs_grl <- get_mut_type(vcfss, type = "dbs")
+mbs_grl <- get_mut_type(vcfss, type = "mbs")
+
+
+muts = mutations_from_vcf(snv_grl[[1]])
+head(muts, 12)
+types = mut_type(snv_grl[[1]])
+head(types, 12)
+context = mut_context(snv_grl[[1]], ref_genome)
+head(context, 12)
+type_context = type_context(snv_grl[[1]], ref_genome)
+lapply(type_context, head, 12)
+type_occurrences <- mut_type_occurrences(snv_grl, ref_genome)
+type_occurrences
+# When the number of vcf files in one folder is over 14, the following error occurred
+#Error in .Call2("C_solve_user_SEW", refwidths, start, end, width, translate.negative.coord,  : 
+#solving row 6657: 'allow.nonnarrowing' is FALSE and the supplied start (0) is < 1
+
+
+#####################################################################################
+
+
+type_occurrences <- mut_type_occurrences(vcfss, ref_genome)
+type_occurrences
+write.table(type_occurrences, "type_occurrences_total.txt", sep="\t")
+
+p1 <- plot_spectrum(type_occurrences)
+p2 <- plot_spectrum(type_occurrences, CT = TRUE)
+p3 <- plot_spectrum(type_occurrences, CT = TRUE, 
+                    indv_points = TRUE, legend = FALSE)
+library("gridExtra")
+grid.arrange(p1, p2, p3, ncol=3, widths=c(3,3,1.75))
+
+dev.copy(tiff,"total_pancO_230205.tiff",width=16, height=8, units="in",res=200) 
+dev.off() 
+
+
+p4 <- plot_spectrum(type_occurrences, by = tissue, CT = TRUE, legend = TRUE)
+p5 <- plot_spectrum(type_occurrences, CT = TRUE, indv_points = TRUE,
+                    legend = TRUE, error_bars = "stdev")
+grid.arrange(p4, p5, ncol=2, widths=c(4,2.3))
+
+dev.copy(tiff,"separate_total_pancO_230205_2.tiff",width=16, height=8, units="in",res=200) 
+dev.off() 
+
+mut_mat <- mut_matrix(vcf_list = snv_grl, ref_genome = ref_genome)
+head(mut_mat)
+plot_96_profile(mut_mat[, c(5, 16)])
+dev.copy(tiff,"SNU3947_4354_230205.tiff",width=8, height=5, units="in",res=200) 
+dev.off() 
+
+write.table(mut_mat, "mut_mat_total.txt", sep="\t")
+plot_96_profile(mut_mat)
+
+
+#####################################################################
+
+mut_mat_ext_context <- mut_matrix(snv_grl, ref_genome, extension = 2)
+plot_profile_heatmap(mut_mat_ext_context, by = tissue)
+dev.copy(tiff,"meta_nometa_heatmap_230205.tiff",width=12, height=5, units="in",res=200) 
+dev.off() 
+
+########################Pooling samples##########################
+
+pooled_mut_mat <- pool_mut_mat(mut_mat, grouping = tissue)
+head(pooled_mut_mat)
+
+
+###########################Indels###########################
+
+indel_grl <- get_indel_context(indel_grl, ref_genome)
+head(indel_grl[[1]], n = 3)
+indel_counts <- count_indel_contexts(indel_grl)
+head(indel_counts)
+plot_indel_contexts(indel_counts, condensed = TRUE)
+
+dev.copy(tiff,"nometa_indel_230205.tiff",width=10, height=11, units="in",res=200) 
+dev.off()
+
+plot_main_indel_contexts(indel_counts)
+dev.copy(tiff,"nometa_indel_main_230205.tiff",width=10, height=11, units="in",res=200) 
+dev.off()
+
+###########################DBSs###########################
+
+head(dbs_grl[[1]])
+dbs_grl <- get_dbs_context(dbs_grl)
+head(dbs_grl[[1]])
+dbs_counts <- count_dbs_contexts(dbs_grl)
+plot_dbs_contexts(dbs_counts, same_y = TRUE)
+dev.copy(tiff,"nometa_dbs_230205.tiff",width=10, height=11, units="in",res=200) 
+dev.off()
+plot_main_dbs_contexts(dbs_counts, same_y = TRUE)
+dev.copy(tiff,"nometa_dbs_main_230205.tiff",width=10, height=11, units="in",res=200) 
+dev.off()
+
+###########################Mutational Signature###########################
+
+
+mut_mat <- mut_mat + 0.0001
+write.table(mut_mat, "mut_mat_signature.txt",  sep = "\t")
+mut_mat2 <- read.delim("mut_mat_signature.txt", sep = "\t", row.names = 1)
+library("NMF")
+estimate <- nmf(mut_mat, rank = 2:5, method = "brunet", 
+                nrun = 10, seed = 123456, .opt = "v-p")
+plot(estimate)
+dev.copy(tiff,"total_nmf_230207.tiff",width=7, height=5, units="in",res=200) 
+dev.off()
+
+nmf_res <- extract_signatures(mut_mat, rank = 2, nrun = 10, single_core = TRUE)
+colnames(nmf_res$signatures) <- c("Signature A", "Signature B")
+rownames(nmf_res$contribution) <- c("Signature A", "Signature B")
+plot_96_profile(nmf_res$signatures, condensed = TRUE)
+dev.copy(tiff,"total_nmf_contribution_2sig_230207.tiff",width=10, height=5, units="in",res=200) 
+dev.off()
+
+plot_contribution(nmf_res$contribution, nmf_res$signature,
+                  mode = "absolute", coord_flip = TRUE,
+)
+dev.copy(tiff,"total_nmf_contribution_relative_230205.tiff",width=12, height=10, units="in",res=200) 
+dev.off()
+
+
+
+plot_contribution_heatmap(nmf_res$contribution, 
+                          cluster_samples = TRUE, 
+                          cluster_sigs = TRUE)
+
+plot_compare_profiles(mut_mat[, 1],
+                      nmf_res$reconstructed[, 1],
+                      profile_names = c("Original", "Reconstructed"),
+                      condensed = TRUE
+)
+
+fit_res <- fit_to_signatures(mut_mat, signatures)
+
+pc1 <- plot_contribution(nmf_res$contribution, nmf_res$signature, mode = "relative")
+pc2 <- plot_contribution(nmf_res$contribution, nmf_res$signature, mode = "absolute")
+grid.arrange(pc1, pc2)
+plot_contribution(nmf_res$contribution, nmf_res$signature, mode = "relative", coord_flip = TRUE)
+
+dev.copy(tiff,"nometa_nmf_contribution_relative_230205.tiff",width=10, height=5, units="in",res=200) 
+dev.off()
+
+sp_url <- paste("https://cancer.sanger.ac.uk/cancergenome/assets/", "signatures_probabilities.txt", sep = "")
+cancer_signatures = read.table(sp_url, sep = "\t", header = TRUE)
+new_order = match(row.names(mut_mat), cancer_signatures$Somatic.Mutation.Type)
+cancer_signatures = cancer_signatures[as.vector(new_order),]
+row.names(cancer_signatures) = cancer_signatures$Somatic.Mutation.Type
+cancer_signatures = as.matrix(cancer_signatures[,4:33])
+plot_96_profile(cancer_signatures[,1:2], condensed = TRUE, ymax = 0.3)
+fit_res <- fit_to_signatures(mut_mat, cancer_signatures)
+select <- which(rowSums(fit_res$contribution) > 10)
+plot_contribution(fit_res$contribution[select,], cancer_signatures[,select], coord_flip = TRUE,mode = "relative")
+
+dev.copy(tiff,"total_absolute_230205.tiff",width=10, height=10, units="in",res=200) 
+dev.off() 
+
+
+plot_contribution(fit_res$contribution[select,], cancer_signatures[,select], coord_flip = TRUE,mode = "relative")
+
+dev.copy(tiff,"total_relative_230205.tiff",width=10, height=10, units="in",res=200) 
+dev.off() 
+
+
+contri_boots <- fit_to_signatures_bootstrapped(mut_mat[, c(3, 7)],
+                                               cancer_signatures,
+                                               n_boots = 50,
+                                               method = "strict"
+)
+
+plot_bootstrapped_contribution(contri_boots)
+
+
+
+
+
