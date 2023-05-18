@@ -1,0 +1,57 @@
+files<-list.files("C://Users/BECAUSEWECAN/Desktop/PancreaticCancerOrganoid/PancreaticOrganoid_WES_Total/TCGA_PAAD_WES")
+files[1]
+setwd("C://Users/BECAUSEWECAN/Desktop/PancreaticCancerOrganoid/Figure 2")
+setwd("C://Users/BECAUSEWECAN/Desktop/PancreaticCancerOrganoid/Without_PDX/Figure 2")
+
+rm(list=ls())
+graphics.off()
+
+raw<-read.table("panc_waterfall_metaonly_count6_220819.txt",header=T, sep="\t", row.names = 1, stringsAsFactors = FALSE)
+raw<-read.table("panc_waterfall_nometaonly_count6_220819.txt",header=T, sep="\t", row.names = 1, stringsAsFactors = FALSE)
+raw = as.matrix(raw)
+colnames(raw)
+
+sampleOrder<-colnames(raw)
+f.sampleOrder<-as.character(t(sampleOrder))
+v.sampleOrder<-as.vector(f.sampleOrder)
+
+# Set the geneorder with meta only file
+geneOrder<-rownames(raw)
+f.geneOrder<-as.character(t(geneOrder))
+v.geneOrder<-as.vector(geneOrder)
+
+# nometa  width = unit(4.5, "cm")
+# dev.copy(tiff,"PancOrganoid_nometa_only_230131.tiff",width=5, height=9, units="in",res=200) 
+
+
+library(ComplexHeatmap)
+
+oncoPrint(raw, get_type = function(x) strsplit(x, ";")[[1]],
+          alter_fun = list( 
+            background = function(x, y, w, h) grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = "#CCCCCC", col = NA)),
+            missense_variant = function(x, y, w, h) grid.rect(x, y, w*0.9, h*0.8, gp = gpar(fill = "navy", col = NA)),
+            frameshift_variant = function(x, y, w, h) grid.rect(x, y, w*0.9, h*0.4, gp = gpar(fill = "brown2", col = NA)),
+            disruptive_inframe_deletion = function(x, y, w, h) grid.rect(x, y, w*0.9, h*0.5, gp = gpar(fill = "tan2", col = NA)),
+            stop_gained = function(x, y, w, h) grid.rect(x, y, w*0.9, h*0.2, gp = gpar(fill = "lightgreen", col = NA)),
+            splice_site = function(x, y, w, h) grid.rect(x, y, w*0.9, h*0.4, gp = gpar(fill = "orchid3", col = NA)),
+            inframe_deletion = function(x, y, w, h) grid.rect(x, y, w*0.9, h*0.3, gp = gpar(fill = "salmon", col = NA)),
+            disruptive_inframe_insertion = function(x, y, w, h) grid.rect(x, y, w*0.9, h*0.1, gp = gpar(fill = "darkorchid1", col = NA)),
+            inframe_insertion = function(x, y, w, h) grid.rect(x, y, w*0.9, h*0.7, gp = gpar(fill = "dodgerblue2", col = NA))
+          ), col = c(missense_variant = "navy", frameshift_variant = "brown2", disruptive_inframe_deletion = "tan2", inframe_deletion = "dodgerblue2",
+                     stop_gained = "lightgreen", splice_site = "orchid3", inframe_insertion = "salmon", disruptive_inframe_insertion = "darkorchid1"),
+          show_column_names = TRUE, column_order = v.sampleOrder, show_row_names = TRUE, row_order = v.geneOrder,
+          column_title = "Pancreatic Organoid Mutation Profile", width = unit(4.5, "cm"), 
+          heatmap_legend_param = list(title = "Alternations", at = c("missense_variant", "frameshift_variant", "disruptive_inframe_deletion", 
+                                                                     "stop_gained", "splice_site", "inframe_insertion", "disruptive_inframe_insertion", "inframe_deletion"), 
+                                      labels = c("missense_variant", "frameshift_variant", "disruptive_inframe_deletion", 
+                                                 "stop_gained", "splice_site", "inframe_insertion", "disruptive_inframe_insertion", "inframe_deletion")
+          ))
+
+
+
+
+
+dev.copy(tiff,"PancOrganoid_nometa_only_230131.tiff",width=5, height=9, units="in",res=200) 
+dev.copy(tiff,"PancOrganoid_meta_only_230131.tiff",width=9, height=9, units="in",res=200) 
+
+dev.off() 
